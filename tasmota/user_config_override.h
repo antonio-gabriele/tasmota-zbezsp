@@ -90,9 +90,9 @@ Examples :
 
 #ifdef ZBEZSP
   #undef USE_DOMOTICZ
-  #define MODULE USER_MODULE
-  #undef FALLBACK_MODULE
-  #define FALLBACK_MODULE USER_MODULE
+  //#define MODULE USER_MODULE
+  //#undef FALLBACK_MODULE
+  //#define FALLBACK_MODULE USER_MODULE
   #define USER_TEMPLATE "{\"NAME\":\"GMGW\",\"GPIO\":[1,1,1,1,5793,1,1,1,1,1,1,1,1,1,5792,3584,0,3552,1,1,0,544,1,1,0,0,0,0,1,1,1,1,1,0,0,1],\"FLAG\":0,\"BASE\":1}"
 
   #undef PROJECT
