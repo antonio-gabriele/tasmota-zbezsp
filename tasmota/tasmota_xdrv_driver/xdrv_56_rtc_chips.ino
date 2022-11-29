@@ -432,7 +432,7 @@ void CmndRtcNtpServer(void) {
  * Interface
 \*********************************************************************************************/
 
-bool Xdrv56(uint8_t function) {
+bool Xdrv56(uint32_t function) {
   bool result = false;
 
 #ifdef RTC_NTP_SERVER
@@ -446,7 +446,7 @@ bool Xdrv56(uint8_t function) {
   }
 #endif  // RTC_NTP_SERVER
 
-  if (FUNC_MODULE_INIT == function) {
+  if (FUNC_I2C_INIT == function) {
     RtcChipDetect();
   }
   else if (RtcChip.detected) {

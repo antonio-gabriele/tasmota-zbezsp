@@ -48,6 +48,7 @@ TasmotaSerial::TasmotaSerial(int receive_pin, int transmit_pin, int hardware_fal
   m_valid = false;
   m_hardserial = false;
   m_hardswap = false;
+  m_overflow = false;
   m_stop_bits = 1;
   m_nwmode = nwmode;
   serial_buffer_size = buffer_size;
@@ -95,7 +96,7 @@ TasmotaSerial::TasmotaSerial(int receive_pin, int transmit_pin, int hardware_fal
 void TasmotaSerial::end(bool turnOffDebug) {
 #ifdef ESP8266
   if (m_hardserial) {
-    Serial.end();
+//    Serial.end();  // Keep active for logging
   } else {
     if (m_rx_pin > -1) {
       detachInterrupt(m_rx_pin);
@@ -134,12 +135,70 @@ bool TasmotaSerial::freeUart(void) {
   }
   return false;
 }
+
+void TasmotaSerial::Esp32Begin(void) {
+  TSerial->begin(m_speed, m_config, m_rx_pin, m_tx_pin);
+  // For low bit rate, below 9600, set the Full RX threshold at 10 bytes instead of the default 120
+  if (m_speed <= 9600) {
+    // At 9600, 10 chars are ~10ms
+    uart_set_rx_full_threshold(m_uart, 10);
+  } else if (m_speed < 115200) {
+    // At 19200, 120 chars are ~60ms
+    // At 76800, 120 chars are ~15ms
+    uart_set_rx_full_threshold(m_uart, 120);
+  } else {
+    // At 115200, 256 chars are ~20ms
+    // Zigbee requires to keep frames together, i.e. 256 bytes max
+    uart_set_rx_full_threshold(m_uart, 256);
+  }
+  // For bitrate below 115200, set the Rx time out to 6 chars instead of the default 10
+  if (m_speed < 115200) {
+    // At 76800 the timeout is ~1ms
+    uart_set_rx_timeout(m_uart, 6);
+  }
+}
 #endif
+
+size_t TasmotaSerial::setRxBufferSize(size_t size) {
+  if (size != serial_buffer_size) {
+    if (m_hardserial) {
+      if (size > 256) {      // Default hardware serial Rx buffer size
+#ifdef ESP8266
+        serial_buffer_size = size;
+        Serial.setRxBufferSize(serial_buffer_size);
+#endif  // ESP8266
+#ifdef ESP32
+        if (TSerial) {
+          // RX Buffer can't be resized when Serial is already running
+          serial_buffer_size = size;
+          TSerial->flush();
+          TSerial->end();
+          delay(10);         // Allow time to cleanup queues - if not used hangs ESP32
+          TSerial->setRxBufferSize(serial_buffer_size);
+          Esp32Begin();
+        }
+#endif  // ESP32
+      }
+    }
+    else if (m_buffer) {
+      uint8_t *m_buffer_temp = (uint8_t*)malloc(size);  // Allocate new buffer
+      if (m_buffer_temp) {                              // If succesful de-allocate old buffer
+        free(m_buffer);
+        m_buffer = m_buffer_temp;
+        serial_buffer_size = size;
+      }
+    }
+  }
+  return serial_buffer_size;
+}
 
 bool TasmotaSerial::begin(uint32_t speed, uint32_t config) {
   if (!m_valid) { return false; }
 
   if (m_hardserial) {
+    if (serial_buffer_size < 256) {
+      serial_buffer_size = 256;
+    }
 #ifdef ESP8266
     Serial.flush();
     Serial.begin(speed, (SerialConfig)config);
@@ -157,10 +216,10 @@ bool TasmotaSerial::begin(uint32_t speed, uint32_t config) {
         TSerial = new HardwareSerial(m_uart);
 #else
         if (0 == m_uart) {
-            Serial.flush();
-            Serial.end();
-            delay(10);             // Allow time to cleanup queues - if not used hangs ESP32
-            TSerial = &Serial;
+          Serial.flush();
+          Serial.end();
+          delay(10);             // Allow time to cleanup queues - if not used hangs ESP32
+          TSerial = &Serial;
         } else {
           TSerial = new HardwareSerial(m_uart);
         }
@@ -173,25 +232,9 @@ bool TasmotaSerial::begin(uint32_t speed, uint32_t config) {
         return m_valid;            // As we currently only support hardware serial on ESP32 it's safe to exit here
       }
     }
-    TSerial->begin(speed, config, m_rx_pin, m_tx_pin);
-    // For low bit rate, below 9600, set the Full RX threshold at 10 bytes instead of the default 120
-    if (speed <= 9600) {
-      // At 9600, 10 chars are ~10ms
-      uart_set_rx_full_threshold(m_uart, 10);
-    } else if (speed < 115200) {
-      // At 19200, 120 chars are ~60ms
-      // At 76800, 120 chars are ~15ms
-      uart_set_rx_full_threshold(m_uart, 120);
-    } else {
-      // At 115200, 256 chars are ~20ms
-      // Zigbee requires to keep frames together, i.e. 256 bytes max
-      uart_set_rx_full_threshold(m_uart, 256);
-    }
-    // For bitrate below 115200, set the Rx time out to 6 chars instead of the default 10
-    if (speed < 115200) {
-      // At 76800 the timeout is ~1ms
-      uart_set_rx_timeout(m_uart, 6);
-    }
+    m_speed = speed;
+    m_config = config;
+    Esp32Begin();
 //    Serial.printf("TSR: Using UART%d\n", m_uart);
 #endif  // ESP32
   } else {
@@ -223,6 +266,21 @@ bool TasmotaSerial::hardwareSerial(void) {
 #ifdef ESP32
   return (0 == m_uart);  // We prefer UART1 and UART2 and keep UART0 for debugging
 #endif  // ESP32
+}
+
+bool TasmotaSerial::overflow(void) {
+  if (m_hardserial) {
+#ifdef ESP8266
+    return Serial.hasOverrun();  // Returns then clear overrun flag
+#endif  // ESP8266
+#ifdef ESP32
+    return false;  // Not implemented
+#endif  // ESP32
+  } else {
+    bool res = m_overflow;
+    m_overflow = false;
+    return res;
+  }
 }
 
 void TasmotaSerial::flush(void) {
@@ -280,7 +338,7 @@ size_t TasmotaSerial::read(char* buffer, size_t size) {
   } else {
     if ((-1 == m_rx_pin) || (m_in_pos == m_out_pos)) { return 0; }
     size_t count = 0;
-    for( ; size && (m_in_pos == m_out_pos) ; --size, ++count) {
+    for( ; size && (m_in_pos != m_out_pos) ; --size, ++count) {
       *buffer++ = m_buffer[m_out_pos];
       m_out_pos = (m_out_pos +1) % serial_buffer_size;
     }
@@ -299,6 +357,11 @@ int TasmotaSerial::available(void) {
   } else {
     int avail = m_in_pos - m_out_pos;
     if (avail < 0) avail += serial_buffer_size;
+
+//    if (!avail) {
+//      optimistic_yield(10000);
+//    }
+
     return avail;
   }
 }
@@ -383,6 +446,10 @@ void IRAM_ATTR TasmotaSerial::rxRead(void) {
       if (next != (int)m_out_pos) {
         m_buffer[m_in_pos] = rec;
         m_in_pos = next;
+      } else {
+        // Buffer overrun - exit and fix Hardware Watchdog in case of high speed flooding
+        m_overflow = true;
+        break;
       }
 
       TM_SERIAL_WAIT_RCV_LOOP;    // wait for stop bit
