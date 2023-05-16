@@ -1116,17 +1116,17 @@ bool LightModuleInit(void)
 #endif  // USE_PWM_DIMMER
 
   if (TasmotaGlobal.light_type > LT_BASIC) {
-    TasmotaGlobal.devices_present++;
+    UpdateDevicesPresent(1);
   }
 
   // post-process for lights
   uint32_t pwm_channels = (TasmotaGlobal.light_type & 7) > LST_MAX ? LST_MAX : (TasmotaGlobal.light_type & 7);
   if (Settings->flag3.pwm_multi_channels) {  // SetOption68 - Enable multi-channels PWM instead of Color PWM
     if (0 == pwm_channels) { pwm_channels = 1; }
-    TasmotaGlobal.devices_present += pwm_channels - 1;    // add the pwm channels controls at the end
+    UpdateDevicesPresent(pwm_channels - 1);  // add the pwm channels controls at the end
   } else if ((Settings->param[P_RGB_REMAP] & 128) && (LST_RGBW <= pwm_channels)) {  // SetOption37
     // if RGBW or RGBCW, and SetOption37 >= 128, we manage RGB and W separately, hence adding a device
-    TasmotaGlobal.devices_present++;
+    UpdateDevicesPresent(1);
   } else {
 #ifdef USE_LIGHT_VIRTUAL_CT
     initCTRange(pwm_channels);
@@ -1780,8 +1780,6 @@ void LightAnimate(void)
     if (TasmotaGlobal.sleep > PWM_MAX_SLEEP) {
       sleep_previous = TasmotaGlobal.sleep;     // save previous value of sleep
       TasmotaGlobal.sleep = PWM_MAX_SLEEP;      // set a maximum value (in milliseconds) to sleep to ensure that animations are smooth
-    } else {
-      sleep_previous = -1;                      // if low enough, don't change it
     }
   } else {
     if (sleep_previous > 0) {
@@ -2189,12 +2187,24 @@ void LightSetOutputs(const uint16_t *cur_col_10) {
         if (i != channel_ct) {   // if CT don't use pwm_min and pwm_max
           cur_col = cur_col > 0 ? changeUIntScale(cur_col, 0, Settings->pwm_range, Light.pwm_min, Light.pwm_max) : 0;   // shrink to the range of pwm_min..pwm_max
         }
-        if (!Settings->flag4.zerocross_dimmer) {
+        
+#ifdef USE_AC_ZERO_CROSS_DIMMER
+        if (Settings->flag4.zerocross_dimmer) {
 #ifdef ESP32
           TasmotaGlobal.pwm_value[i] = ac_zero_cross_power(cur_col);   // mark the new expected value
           // AddLog(LOG_LEVEL_DEBUG_MORE, "analogWrite-%i 0x%03X", i, cur_col);
 #else // ESP32
           analogWrite(Pin(GPIO_PWM1, i), bitRead(TasmotaGlobal.pwm_inverted, i) ? Settings->pwm_range - ac_zero_cross_power(cur_col) : ac_zero_cross_power(cur_col));
+          // AddLog(LOG_LEVEL_DEBUG_MORE, "analogWrite-%i 0x%03X", bitRead(TasmotaGlobal.pwm_inverted, i) ? Settings->pwm_range - ac_zero_cross_power(cur_col) : ac_zero_cross_power(cur_col));
+#endif // ESP32
+        } else
+#endif // USE_AC_ZERO_CROSS_DIMMER
+        if (1) {      // if true used to balance the optional if (Settings->flag4.zerocross_dimmer)
+#ifdef ESP32
+          TasmotaGlobal.pwm_value[i] = cur_col;   // mark the new expected value
+          // AddLog(LOG_LEVEL_DEBUG_MORE, "analogWrite-%i 0x%03X", i, cur_col);
+#else // ESP32
+          analogWrite(Pin(GPIO_PWM1, i), bitRead(TasmotaGlobal.pwm_inverted, i) ? Settings->pwm_range - cur_col : cur_col);
           // AddLog(LOG_LEVEL_DEBUG_MORE, "analogWrite-%i 0x%03X", bitRead(TasmotaGlobal.pwm_inverted, i) ? Settings->pwm_range - cur_col : cur_col);
 #endif // ESP32
         }
