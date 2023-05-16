@@ -117,5 +117,32 @@ Examples :
 #endif
 
 
+#ifdef FIRMWARE_EWELINK
+  #warning **** Build: FIRMWARE FOR EWELINK ZB-GW03-V1.2 ****
+
+  #define USER_TEMPLATE "{\"NAME\":\"ZB-GW03-V1.2\",\"GPIO\":[0,0,3552,0,3584,0,0,0,5793,5792,320,544,5536,0,5600,0,0,0,0,5568,0,0,0,0,0,0,0,0,608,640,32,0,0,0,0,0],\"FLAG\":0,\"BASE\":1}"
+
+  #undef  SERIAL_LOG_LEVEL
+  #define SERIAL_LOG_LEVEL LOG_LEVEL_NONE
+
+  #define USE_ZIGBEE
+  #undef  USE_ZIGBEE_ZNP
+  #define USE_ZIGBEE_EZSP
+  #define USE_UFILESYS
+  #define USE_ZIGBEE_EEPROM // T24C512A
+  #define USE_TCP_BRIDGE
+  #undef  USE_ZIGBEE_CHANNEL
+  #define USE_ZIGBEE_CHANNEL 11 // (11-26)
+  
+  #define USE_ETHERNET
+  #undef  ETH_TYPE
+  #define ETH_TYPE 0 // ETH_PHY_LAN8720
+  #undef  ETH_CLKMODE
+  #define ETH_CLKMODE 3 // ETH_CLOCK_GPIO17_OUT
+  #undef  ETH_ADDRESS
+  #define ETH_ADDRESS 1 // PHY1
+#endif
+
+
 
 #endif  // _USER_CONFIG_OVERRIDE_H_
